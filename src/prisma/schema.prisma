@@ -1,0 +1,250 @@
+// schema.prisma
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["filterJson"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CITIZEN       // Звичайний користувач
+  OPERATOR      // Оператор центру
+  ADMINISTRATOR // Адміністратор системи
+  MODERATOR     // Модератор контенту
+}
+
+enum ServiceStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  MISSED
+  REJECTED
+}
+
+enum ConsultationStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum NotificationType {
+  APPOINTMENT_REMINDER
+  APPOINTMENT_UPDATE
+  CONSULTATION_RESPONSE
+  NEWS_UPDATE
+  SYSTEM_NOTIFICATION
+}
+
+model User {
+  id                Int              @id @default(autoincrement())
+  email             String           @unique
+  passwordHash      String
+  firstName         String
+  lastName          String
+  phone             String           @unique
+  role              UserRole         @default(CITIZEN)
+  isVerified        Boolean          @default(false)
+  verificationToken String?
+  resetToken        String?
+  resetTokenExpires DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  appointments      Appointment[]
+  consultations     Consultation[]
+  notifications     Notification[]
+  documents         Document[]
+  schedules         Schedule[]       @relation("OperatorSchedules")
+  managedServices   Service[]       @relation("ServiceManager")
+
+  @@map("users")
+}
+
+model ServiceCategory {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  slug        String    @unique
+  services    Service[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("service_categories")
+}
+
+model Service {
+  id               Int             @id @default(autoincrement())
+  title            String
+  description      String
+  category         ServiceCategory @relation(fields: [categoryId], references: [id])
+  categoryId       Int
+  duration         Int             // in minutes
+  price            Float?
+  status           ServiceStatus   @default(ACTIVE)
+  requiredDocuments String[]       // JSON array of required documents
+  onlineAvailable  Boolean         @default(false)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  appointments     Appointment[]
+  manager          User?           @relation("ServiceManager", fields: [managerId], references: [id])
+  managerId        Int?
+  schedules        Schedule[]
+
+  @@map("services")
+}
+
+model Appointment {
+  id          Int          @id @default(autoincrement())
+  user        User         @relation(fields: [userId], references: [id])
+  userId      Int
+  service     Service      @relation(fields: [serviceId], references: [id])
+  serviceId   Int
+  date        DateTime
+  endDate     DateTime
+  status      AppointmentStatus @default(PENDING)
+  notes       String?
+  documents   Document[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  schedule    Schedule?    @relation(fields: [scheduleId], references: [id])
+  scheduleId  Int?
+
+  @@map("appointments")
+}
+
+model Schedule {
+  id           Int           @id @default(autoincrement())
+  dayOfWeek    DayOfWeek     @default (SUNDAY)
+  startTime    DateTime
+  endTime      DateTime
+  isRecurring  Boolean       @default(true)
+  operator     User          @relation("OperatorSchedules", fields: [operatorId], references: [id])
+  operatorId   Int
+  service      Service       @relation(fields: [serviceId], references: [id])
+  serviceId    Int
+  appointments Appointment[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@map("schedules")
+}
+
+model Consultation {
+  id          Int               @id @default(autoincrement())
+  user        User              @relation(fields: [userId], references: [id])
+  userId      Int
+  topic       String
+  question    String
+  answer      String?
+  status      ConsultationStatus @default(PENDING)
+  answeredBy  User?             @relation(fields: [answeredById], references: [id])
+  answeredById Int?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  attachments ConsultationAttachment[]
+
+  @@map("consultations")
+}
+
+model ConsultationAttachment {
+  id             Int           @id @default(autoincrement())
+  consultation   Consultation  @relation(fields: [consultationId], references: [id])
+  consultationId Int
+  fileUrl        String
+  fileName       String
+  fileType       String
+  createdAt      DateTime      @default(now())
+
+  @@map("consultation_attachments")
+}
+
+model Document {
+  id           Int          @id @default(autoincrement())
+  user         User         @relation(fields: [userId], references: [id])
+  userId       Int
+  appointment  Appointment? @relation(fields: [appointmentId], references: [id])
+  appointmentId Int?
+  documentType String
+  fileUrl      String
+  fileName     String
+  fileSize     Int
+  isValid      Boolean      @default(false)
+  verifiedBy   User?        @relation(fields: [verifiedById], references: [id])
+  verifiedById Int?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@map("documents")
+}
+
+model News {
+  id          Int       @id @default(autoincrement())
+  title       String
+  slug        String    @unique
+  content     String
+  excerpt     String?
+  imageUrl    String?
+  isPublished Boolean   @default(false)
+  publishedAt DateTime?
+  author      User      @relation(fields: [authorId], references: [id])
+  authorId    Int
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  tags        NewsTag[]
+
+  @@map("news")
+}
+
+model NewsTag {
+  id        Int    @id @default(autoincrement())
+  name      String @unique
+  newsItems News[] @relation(references: [id])
+  
+  @@map("news_tags")
+}
+
+model Notification {
+  id           Int              @id @default(autoincrement())
+  user         User             @relation(fields: [userId], references: [id])
+  userId       Int
+  type         NotificationType
+  title        String
+  message      String
+  isRead       Boolean          @default(false)
+  relatedId    Int?             // ID related entity (appointment, consultation etc)
+  relatedType  String?          // Type of related entity
+  createdAt    DateTime         @default(now())
+  readAt       DateTime?
+
+  @@map("notifications")
+}
+
+model SystemSetting {
+  id          Int     @id @default(autoincrement())
+  key         String  @unique
+  value       String
+  description String?
+  isPublic    Boolean @default(false)
+
+  @@map("system_settings")
+}
+
+export enum DayOfWeek {
+  SUNDAY = 0,
+  MONDAY = 1,
+  TUESDAY = 2,
+  WEDNESDAY = 3,
+  THURSDAY = 4,
+  FRIDAY = 5,
+  SATURDAY = 6,
+}
